@@ -611,7 +611,7 @@ pub use horizon_items::item_nbt::{
     decode_items, encode_item, encode_items, item_from_nbt, item_to_nbt,
 };
 /// The block entity type ID for the block it sits in (a chest-like container
-/// is a chest, trapped chest or barrel).
+/// is a chest, trapped chest or barrel; a content mod's chest its template's).
 fn block_entity_id(e: &crate::containers::BlockEntity, block: &str) -> String {
     match (e, block) {
         (
@@ -623,6 +623,11 @@ fn block_entity_id(e: &crate::containers::BlockEntity, block: &str) -> String {
         ) => block.to_owned(),
         (crate::containers::BlockEntity::Chest(_), b) if b.ends_with("shulker_box") => {
             "minecraft:shulker_box".to_owned()
+        }
+        (crate::containers::BlockEntity::Chest(_), b)
+            if crate::containers::chest_form(b).is_some_and(|chest| chest.trapped) =>
+        {
+            "minecraft:trapped_chest".to_owned()
         }
         _ => e.id().to_owned(),
     }
@@ -6926,6 +6931,28 @@ mod tests {
                 assert_eq!(item.item.as_ref(), "minecraft:diamond");
                 assert_eq!(item.count, 3);
             }
+        }
+    }
+
+    /// A content mod's chest saves its block entity under its template's type,
+    /// a trapped one's as `TrappedChestBlockEntity`, and loads it back as the
+    /// block's own, items and all.
+    #[test]
+    fn a_mod_chest_saves_as_its_templates_block_entity() {
+        use crate::containers::BlockEntity;
+        crate::containers::register_test_chests();
+        for (block, id) in [
+            ("ruby:strongbox", "minecraft:chest"),
+            ("ruby:trap", "minecraft:trapped_chest"),
+        ] {
+            let mut entity = BlockEntity::for_block(block).expect(block);
+            entity.slots_mut()[5] = Some(crate::items::ItemStack::new("minecraft:diamond", 2));
+            let tag = encode_block_entity((1, 2, 3), &entity, block);
+            assert_eq!(tag.get("id"), Some(&string(id)), "{block}");
+            let (_, back) = decode_block_entity(&tag).expect(block);
+            assert!(back.fits(block), "{block}");
+            let item = back.slots()[5].as_ref().expect("the saved item");
+            assert_eq!((item.item.as_ref(), item.count), ("minecraft:diamond", 2));
         }
     }
 

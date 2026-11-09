@@ -13,7 +13,10 @@ use super::{
     animal_brain::{Bx, Tracker, WalkTarget, mem, mem_ref},
     copper_golem as cg,
 };
-use crate::{containers::BlockEntity, items::ItemStack};
+use crate::{
+    containers::{BlockEntity, is_chest_block},
+    items::ItemStack,
+};
 use horizon_core::{
     geometry::{Aabb, Vec3},
     random::RandomSource,
@@ -89,15 +92,14 @@ fn name_at(w: &MobWorld, p: [i32; 3]) -> String {
         .name
         .to_string()
 }
-fn is_chest_block(name: &str) -> bool {
-    matches!(name, "minecraft:chest" | "minecraft:trapped_chest") || name.ends_with("copper_chest")
-}
-/// `CopperGolemAi.TRANSPORT_ITEM_SOURCE_BLOCK` / `_DESTINATION_BLOCK`.
+/// `CopperGolemAi.TRANSPORT_ITEM_SOURCE_BLOCK` / `_DESTINATION_BLOCK`: a
+/// chest or trapped chest takes what the golem carries, a content mod's
+/// chest too, by its template's class.
 fn wanted(w: &MobWorld, m: &Mob, name: &str) -> bool {
     if held(m).is_none() {
         w.has_tag("minecraft:copper_chests", name) || w.has_tag("copper_chests", name)
     } else {
-        matches!(name, "minecraft:chest" | "minecraft:trapped_chest")
+        crate::containers::chest_form(name).is_some()
     }
 }
 /// `ChestBlock.getConnectedBlockPos`: the other half of a double chest.

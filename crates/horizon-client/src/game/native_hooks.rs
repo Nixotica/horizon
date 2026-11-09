@@ -12035,6 +12035,32 @@ impl Game<'_> {
             .into(),
         )))
     }
+    /// The content mods' chests (`containers::register_mod_chests`) whose
+    /// block entity a native mod makes, by `native_block_entity` or a
+    /// state-aware factory: they keep the mod's own, its menu and its drawing,
+    /// as before a block was a chest by its template's class. Each game asks;
+    /// the first one's answer stands. Whether a native mod claims any.
+    pub(super) fn leave_native_chests(&mut self) -> bool {
+        let mut blocks: Vec<&str> = horizon_client::containers::mod_chest_blocks().collect();
+        blocks.sort_unstable();
+        let mut native = Vec::new();
+        for block in blocks {
+            let mut stateful = false;
+            self.native_stateful_block_entity(block, &mut stateful);
+            let mut entity = None;
+            if !stateful {
+                self.native_block_entity(block, &mut entity);
+            }
+            if stateful || entity.is_some() {
+                native.push(block.to_owned());
+            }
+        }
+        let claimed = !native.is_empty();
+        if !horizon_client::containers::leave_native_chests(native) {
+            log::warn!("Horizon: the native mods' chests changed; restart the game to use them");
+        }
+        claimed
+    }
     /// Compile static factory ownership lazily: creation can precede the
     /// first block-entity tick (commands, chunk sync or a harness).
     pub(super) fn ensure_stateful_entity_table(&mut self) {

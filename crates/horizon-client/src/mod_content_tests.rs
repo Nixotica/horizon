@@ -4809,6 +4809,103 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
+/// A block that copies vanilla's chest or trapped chest is that chest by the
+/// class chain it takes from its template, whatever it is named, and the
+/// tables that go by name learn it from the facts; a block of another
+/// template is none.
+#[test]
+fn a_mod_block_is_a_chest_by_its_templates_class() {
+    use crate::blocks::ChestForm;
+    use horizon_world::registry::BlockRegistry;
+    let (base, _) = block_base_of(
+        "chest-class",
+        &[],
+        r#"{"states":[
+      ["minecraft:air",false,false,"",{"id":"minecraft:air"}],
+      ["minecraft:chest",false,false,"",{"id":"minecraft:chest"}],
+      ["minecraft:trapped_chest",false,false,"",{"id":"minecraft:trapped_chest"}],
+      ["minecraft:test",false,false,"",{"id":"minecraft:test"}]],
+      "defaults":{"minecraft:air":0,"minecraft:chest":1,"minecraft:trapped_chest":2,
+        "minecraft:test":3}}"#,
+    );
+    let block = |template: &str| format!(r#"{{"template":"{template}","item":false}}"#);
+    let m = folder_mod(
+        &base.parent().unwrap().join("ruby"),
+        &[
+            ("horizon-mod.toml", &manifest("ruby", "")),
+            (
+                "data/ruby/horizon/block/strongbox.json",
+                &block("minecraft:chest"),
+            ),
+            (
+                "data/ruby/horizon/block/trap.json",
+                &block("minecraft:trapped_chest"),
+            ),
+            // A native mod's machine on a chest template: a chest by class
+            // too, until the game asks its native mod (`leave_native_chests`).
+            (
+                "data/ruby/horizon/block/press.json",
+                &block("minecraft:chest"),
+            ),
+            (
+                "data/ruby/horizon/block/crate.json",
+                &block("minecraft:test"),
+            ),
+        ],
+    );
+    let plan = Plan::new(&base, std::slice::from_ref(&m)).unwrap();
+    let mut facts: J = read_json(&base.join("facts.json")).unwrap();
+    let mut gameplay: J = read_json(&base.join("gameplay-facts.json")).unwrap();
+    let Some(J::Arr(rows)) = gameplay.at("states") else {
+        unreachable!()
+    };
+    for (i, row) in rows.iter_mut().enumerate() {
+        row.set("id", J::Num(i.into()));
+    }
+    let mut behaviours: J = serde_json::from_str(
+        r#"{"states":[[0,0],[0,0],[0,0],[0,0]],"items":{},"blocks":[
+          {"name":"minecraft:air","class":["AirBlock","Block"]},
+          {"name":"minecraft:chest",
+           "class":["ChestBlock","AbstractChestBlock","BaseEntityBlock","Block"]},
+          {"name":"minecraft:trapped_chest",
+           "class":["TrappedChestBlock","ChestBlock","AbstractChestBlock","BaseEntityBlock","Block"]},
+          {"name":"minecraft:test","class":["Block"]}]}"#,
+    )
+    .unwrap();
+    plan.json("facts.json", &mut facts).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    plan.json("block-behaviours.json", &mut behaviours).unwrap();
+    fs::write(
+        base.join("gameplay-facts.json"),
+        serde_json::to_vec(&gameplay).unwrap(),
+    )
+    .unwrap();
+    let registry =
+        BlockRegistry::from_facts_json(serde_json::to_vec(&facts).unwrap().as_slice()).unwrap();
+    let behaviours = serde_json::to_value(behaviours).unwrap();
+    let (facts, _) =
+        BlockFacts::load_with_projection(&base, &registry, &behaviours, false).unwrap();
+    let form = |name: &str| {
+        facts
+            .get(registry.default_state(name).unwrap())
+            .chest_form()
+    };
+    let (chest, trapped) = (
+        Some(ChestForm { trapped: false }),
+        Some(ChestForm { trapped: true }),
+    );
+    assert_eq!(form("ruby:strongbox"), chest);
+    assert_eq!(form("ruby:trap"), trapped);
+    assert_eq!(form("ruby:press"), chest);
+    assert_eq!(form("ruby:crate"), None);
+    assert_eq!(form("minecraft:trapped_chest"), trapped);
+    // The tests' list is these three: whichever registers first, both agree.
+    assert!(crate::containers::register_mod_chests(&facts));
+    assert_eq!(crate::containers::chest_form("ruby:trap"), trapped);
+    assert_eq!(crate::containers::chest_form("ruby:crate"), None);
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
 /// A small stand-in for the base root: nested folders, an empty file, an empty folder.
 fn small_base(base: &Path) {
     for (name, bytes) in [

@@ -592,7 +592,12 @@ impl GameLevel<'_> {
                     furnace: false,
                 }
             }
-            _ => removal::pre_remove(&name),
+            // A content mod's chest spills as its template does: by class,
+            // the chest whose block entity it has.
+            _ => match self.facts.get(old).chest_form() {
+                Some(chest) => removal::pre_remove(chest.block_entity_type()),
+                None => removal::pre_remove(&name),
+            },
         };
         let mut neighbour_updates = 0;
         if side_effects {

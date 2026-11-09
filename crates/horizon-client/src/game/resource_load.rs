@@ -441,6 +441,11 @@ pub(super) fn load_resources(
         environment,
         collision,
     } = core;
+    // A content mod's chest is a chest by its template's class: the tables
+    // that go by block name know it before anything reads them.
+    if !horizon_client::containers::register_mod_chests(&facts) {
+        log::warn!("Horizon: the mods' chests changed; restart the game to use them");
+    }
     let assets = Arc::new(assets);
     let render = Arc::new(render);
     if let Some(folder) = launch_world {

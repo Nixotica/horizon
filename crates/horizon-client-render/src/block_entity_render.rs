@@ -324,7 +324,7 @@ enum Kind {
     Chest {
         /// The block (`neighbourState.is(state.getBlock())`).
         block: String,
-        texture: &'static str,
+        texture: String,
         part: ChestPart,
         y_rot: f32,
         double_with: Option<[i32; 3]>,
@@ -400,7 +400,7 @@ fn sign(hanging: bool, wall: bool, prop: &dyn Fn(&str) -> Option<String>) -> Kin
 fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Kind {
     let name = name.strip_prefix("minecraft:").unwrap_or(name);
     let facing = || intern(&prop("facing").unwrap_or_default());
-    let chest = |texture: &'static str, left: &'static str, right: &'static str| {
+    let chest = |texture: &str, left: &str, right: &str| {
         let facing = facing();
         let part = match prop("type").as_deref() {
             Some("left") => ChestPart::Left,
@@ -419,7 +419,8 @@ fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Kind {
                 ChestPart::Single => texture,
                 ChestPart::Left => left,
                 ChestPart::Right => right,
-            },
+            }
+            .to_owned(),
             part,
             y_rot: y_rot(facing),
             double_with: other,
@@ -427,6 +428,19 @@ fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Kind {
     };
     if let Some(hanging) = signs::sign_kind(name) {
         return sign(hanging, name.contains("_wall_"), prop);
+    }
+    // A content mod's chest, by its template's class (`containers::chest_form`):
+    // vanilla's chest model in the mod's textures, `<ns>:entity/chest/<path>`
+    // and its `_left` and `_right` for the halves of a double chest.
+    if let Some((namespace, path)) = name.split_once(':')
+        && crate::containers::chest_form(name).is_some()
+    {
+        let texture = format!("{namespace}:entity/chest/{path}");
+        return chest(
+            &texture,
+            &format!("{texture}_left"),
+            &format!("{texture}_right"),
+        );
     }
     let unwaxed = name.strip_prefix("waxed_").unwrap_or(name);
     match unwaxed {
@@ -2394,7 +2408,7 @@ impl BlockEntityRenderer {
                         ChestPart::Right => "entity/chest/christmas_right",
                     }
                 } else {
-                    *texture
+                    texture.as_str()
                 };
                 add_sprite(texture);
             }
@@ -2811,6 +2825,12 @@ impl BlockEntityRenderer {
                 y_rot,
                 ..
             } => {
+                // A mod's block whose block entity its native mod makes draws
+                // itself, even when told of that after this was classified
+                // (`containers::leave_native_chests`).
+                if block.contains(':') && crate::containers::chest_form(block).is_none() {
+                    return;
+                }
                 // ChestRenderer.getChestMaterial: normal and trapped chests use the christmas
                 // sprites on 24-26 December. Copper and ender chests keep theirs.
                 let texture = if matches!(block.as_str(), "chest" | "trapped_chest")
@@ -2822,7 +2842,7 @@ impl BlockEntityRenderer {
                         ChestPart::Right => "entity/chest/christmas_right",
                     }
                 } else {
-                    *texture
+                    texture.as_str()
                 };
                 // Trapped and ender chests have models of their own when a `.jem` reshapes
                 // them; copper chests have no CEM name and draw vanilla's chest.
@@ -3780,7 +3800,7 @@ mod tests {
                 for y_rot in [0.0, 90.0, 180.0, 270.0] {
                     let kind = Kind::Chest {
                         block: "chest".into(),
-                        texture: "entity/chest/normal",
+                        texture: "entity/chest/normal".into(),
                         part,
                         y_rot,
                         double_with: None,
@@ -3897,9 +3917,9 @@ mod tests {
             Kind::Chest {
                 part: ChestPart::Left,
                 double_with: Some([1, 0, 0]),
-                texture: "entity/chest/normal_left",
+                ref texture,
                 ..
-            }
+            } if texture == "entity/chest/normal_left"
         ));
         let k = classify(
             "minecraft:waxed_oxidized_copper_chest",
@@ -3907,10 +3927,7 @@ mod tests {
         );
         assert!(matches!(
             k,
-            Kind::Chest {
-                texture: "entity/chest/copper_oxidized",
-                ..
-            }
+            Kind::Chest { ref texture, .. } if texture == "entity/chest/copper_oxidized"
         ));
         assert!(matches!(
             classify("minecraft:lectern", &props(&[("has_book", "false")])),
@@ -4843,7 +4860,7 @@ mod tests {
         let draw = |renderer: &BlockEntityRenderer, block: &str, texture: &'static str| {
             let kind = Kind::Chest {
                 block: block.into(),
-                texture,
+                texture: texture.into(),
                 part: ChestPart::Single,
                 y_rot: 0.0,
                 double_with: None,

@@ -167,9 +167,15 @@ impl Game<'_> {
         self.lan_block_event(pos, 1, count);
         // TrappedChestBlockEntity.signalOpenCount: its signal is the count
         // (`TrappedChestBlock.getSignal`), so the blocks around it and
-        // below it hear of a change.
+        // below it hear of a change. A mod's trapped chest is one by class.
         let state = self.world.block(pos[0], pos[1], pos[2]);
-        if before != count && self.res.facts().get(state).name.as_ref() == "minecraft:trapped_chest"
+        if before != count
+            && self
+                .res
+                .facts()
+                .get(state)
+                .chest_form()
+                .is_some_and(|chest| chest.trapped)
         {
             let p = BlockPos::new(pos[0], pos[1], pos[2]);
             self.with_level(|b, level, ticks| {

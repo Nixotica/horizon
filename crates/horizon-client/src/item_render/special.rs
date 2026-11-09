@@ -191,11 +191,17 @@ fn texture_sprite(id: &str) -> String {
     let path = path.strip_prefix("textures/").unwrap_or(path);
     path.strip_suffix(".png").unwrap_or(path).to_owned()
 }
+/// `MaterialMapper.apply`: texture `id` under `entity/<directory>/`, in its
+/// own namespace (`ruby:strongbox` is `ruby:entity/chest/strongbox`); the
+/// atlas names vanilla's sprites without theirs.
 fn mapped(directory: &str, id: &str) -> String {
-    format!(
-        "entity/{directory}/{}",
-        id.strip_prefix("minecraft:").unwrap_or(id)
-    )
+    match id.split_once(':') {
+        Some((namespace, path)) if namespace != "minecraft" => {
+            format!("{namespace}:entity/{directory}/{path}")
+        }
+        Some((_, path)) => format!("entity/{directory}/{path}"),
+        None => format!("entity/{directory}/{id}"),
+    }
 }
 /// `DyeColor.getTextureDiffuseColor` as ARGB.
 fn dye(name: &str) -> u32 {
@@ -697,6 +703,11 @@ mod tests {
         assert_eq!(
             mapped("chest", "minecraft:christmas"),
             "entity/chest/christmas"
+        );
+        // A mod's texture stays in its namespace, where the atlas packs it.
+        assert_eq!(
+            mapped("chest", "ruby:strongbox"),
+            "ruby:entity/chest/strongbox"
         );
     }
 

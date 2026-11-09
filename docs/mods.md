@@ -207,6 +207,25 @@ signs `template_hanging_sign_rot_0` to `_rot_3`, `template_attached_hanging_sign
 `minecraft:wall_hanging_signs`, which vanilla's other sign tags and `minecraft:mineable/axe` include. Give the
 wall form a loot table of its own, or name it `<x>_wall_sign` so that it drops what `<x>_sign`'s table does.
 
+A block whose template is `minecraft:chest` or `minecraft:trapped_chest` is a chest in the same way: it has
+vanilla's chest block entity, whose 27 slots open, save and spill as a chest's do; two of the same block side by
+side join into a double chest (never with a chest of another block); hoppers, comparators and copper golems use
+it as a chest; and a trapped one powers redstone while it is open. The client draws vanilla's chest model and
+lid in the mod's textures, laid out as vanilla's chest textures are: `ruby:strongbox` is
+`assets/ruby/textures/entity/chest/strongbox.png`, with `strongbox_left.png` and `strongbox_right.png` for the
+halves of a double chest. Its block model only names the particle texture, as `minecraft:block/chest` does, and
+its item draws the chest with a special model, `assets/ruby/items/strongbox.json`:
+
+```json
+{ "model": { "type": "minecraft:special", "base": "minecraft:item/chest",
+    "model": { "type": "minecraft:chest", "texture": "ruby:strongbox" } } }
+```
+
+List the blocks in `minecraft:mineable/axe`, and in `minecraft:guarded_by_piglins` for piglins to guard them, as
+vanilla's chests are. A block whose block entity a native mod makes (`native_block_entity`,
+[native-mods.md](native-mods.md)) keeps that one, with its menu and its drawing, and is no chest. A block copying a
+copper chest is not one of these yet.
+
 A block can override its targeting outline with `shapes` and independently override movement
 collision with `collision_shapes`. Both take the same table format. Boxes are
 `[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), at most 16 per shape.

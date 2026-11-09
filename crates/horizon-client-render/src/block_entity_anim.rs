@@ -845,6 +845,10 @@ pub enum Ticker {
 
 /// The [`Ticker`] of a block state, by block name and property lookup.
 pub fn ticker(name: &str, prop: impl Fn(&str) -> Option<String>) -> Option<Ticker> {
+    // `ChestBlock.getTicker`: a content mod's chest is one by its template's class.
+    if crate::containers::chest_form(name).is_some() {
+        return Some(Ticker::Lid);
+    }
     let name = name.strip_prefix("minecraft:").unwrap_or(name);
     let unwaxed = name.strip_prefix("waxed_").unwrap_or(name);
     Some(match unwaxed {

@@ -123,7 +123,7 @@ fn chest_renderer_with(kinds: Vec<Kind>) -> BlockEntityRenderer {
 fn chest_renderer() -> BlockEntityRenderer {
     chest_renderer_with(vec![Kind::Chest {
         block: "chest".into(),
-        texture: "entity/chest/normal",
+        texture: "entity/chest/normal".into(),
         part: ChestPart::Single,
         y_rot: 90.0,
         double_with: None,
@@ -1199,6 +1199,118 @@ fn double_chest_cache_bypasses_both_halves_while_either_lid_is_open() {
         &|pos| if pos[0] == 0 { 0.0 } else { 0.8 },
     );
     assert_eq!(wrong_facing, (0.0, None), "mismatched facings do not pair");
+}
+
+/// A content mod's chest draws vanilla's chest model from its own sprites,
+/// `<ns>:entity/chest/<path>` and its `_left` and `_right` halves, and a half
+/// pairs only with the other half of the same block. A block whose native mod
+/// makes its block entity draws none.
+#[test]
+fn a_mod_chest_draws_vanillas_model_in_its_own_textures() {
+    crate::containers::register_test_chests();
+    let mut kinds = vec![
+        classified_chest("ruby:strongbox", "north", "left"),
+        classified_chest("ruby:strongbox", "north", "right"),
+        classified_chest("ruby:trap", "north", "right"),
+        classified_chest("minecraft:chest", "north", "right"),
+        classified_chest("ruby:trap", "east", "single"),
+    ];
+    let textures: Vec<_> = kinds
+        .iter()
+        .map(|kind| match kind {
+            Kind::Chest { texture, .. } => texture.as_str(),
+            _ => panic!("not a chest: {kind:?}"),
+        })
+        .collect();
+    assert_eq!(
+        textures,
+        [
+            "ruby:entity/chest/strongbox_left",
+            "ruby:entity/chest/strongbox_right",
+            "ruby:entity/chest/trap_right",
+            "entity/chest/normal_right",
+            "ruby:entity/chest/trap",
+        ]
+    );
+    assert!(matches!(
+        classified_chest("ruby:crate", "north", "single"),
+        Kind::None
+    ));
+    assert!(matches!(
+        classified_chest("ruby:press", "north", "single"),
+        Kind::None
+    ));
+    // The native mod's block as classified before its mod claimed it.
+    kinds.push(Kind::Chest {
+        block: "ruby:press".into(),
+        texture: "ruby:entity/chest/press".into(),
+        part: ChestPart::Single,
+        y_rot: 0.0,
+        double_with: None,
+    });
+    let renderer = chest_renderer_with(kinds);
+    let world = World::new(BlockStateId(99), 1);
+    let anim = |_: [i32; 3]| BlockAnim::default();
+    let mut scene = Scene {
+        camera: DVec3::new(2.25, 64.5, -3.75),
+        orientation: Quat::IDENTITY,
+        anim: &anim,
+        texts: None,
+        partial: 1.0,
+        game_time: 0,
+        max_y: 320,
+        world: &world,
+        sprites: &HashMap::new(),
+        emissive: &Default::default(),
+        translucent_sprites: &HashSet::new(),
+        atlas_revision: 1,
+        nether: false,
+        lid: &|_| 0.0,
+        sign: &|_| None,
+        banner: &|_| Vec::new(),
+        skull: &|_| None,
+        glyph: &|_| Glyph::default(),
+        glyphs: 0,
+        font: None,
+        dynamic_visible: None,
+    };
+    let left = [([0, 64, 0], 0)];
+    // Without its own sprite it draws nothing: vanilla's is not it.
+    let vanilla = sprite_atlas(&["entity/chest/normal_left"]);
+    scene.sprites = &vanilla;
+    assert!(render_direct(&renderer, &scene, &left).is_empty());
+    let own = sprites("ruby:entity/chest/strongbox_left");
+    scene.sprites = &own;
+    let drawn = render_direct(&renderer, &scene, &left);
+    let sprite = own["ruby:entity/chest/strongbox_left"];
+    assert!(!drawn.is_empty());
+    assert!(
+        drawn
+            .iter()
+            .all(|v| (sprite.u0..=sprite.u1).contains(&v.uv[0])
+                && (sprite.v0..=sprite.v1).contains(&v.uv[1]))
+    );
+    let press = sprites("ruby:entity/chest/press");
+    scene.sprites = &press;
+    assert!(render_direct(&renderer, &scene, &[([0, 64, 0], 5)]).is_empty());
+    // The left half facing north joins its right half to the east.
+    let openness = |east: u32| {
+        renderer.chest_openness_of(
+            [0, 64, 0],
+            0,
+            &|pos| if pos[0] == 1 { east } else { 99 },
+            &|pos| if pos[0] == 1 { 0.8 } else { 0.0 },
+        )
+    };
+    let (open, other) = openness(1);
+    assert_eq!(other, Some([1, 64, 0]));
+    assert!(open > 0.0, "the pair opens with either lid");
+    assert_eq!(
+        openness(2),
+        (0.0, None),
+        "another mod's chest is no partner"
+    );
+    assert_eq!(openness(3), (0.0, None), "vanilla's chest is no partner");
 }
 
 #[test]

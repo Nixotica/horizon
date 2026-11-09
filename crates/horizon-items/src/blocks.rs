@@ -117,6 +117,25 @@ impl SignForm {
         }
     }
 }
+/// Which of vanilla's two plain `ChestBlock`s a block is: a chest, or a
+/// `TrappedChestBlock`. Copper chests (`CopperChestBlock`) are neither: they
+/// weather and pair by their names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChestForm {
+    /// `TrappedChestBlock`: it gives a redstone signal while open.
+    pub trapped: bool,
+}
+impl ChestForm {
+    /// The block entity type its `newBlockEntity` makes, which is also the
+    /// name of vanilla's block of this form.
+    pub fn block_entity_type(self) -> &'static str {
+        if self.trapped {
+            "minecraft:trapped_chest"
+        } else {
+            "minecraft:chest"
+        }
+    }
+}
 impl StateFacts {
     pub fn has_class(&self, name: &str) -> bool {
         self.classes.iter().any(|c| &**c == name)
@@ -128,6 +147,13 @@ impl StateFacts {
             hanging: self.has_class("CeilingHangingSignBlock")
                 || self.has_class("WallHangingSignBlock"),
             wall: self.has_class("WallSignBlock") || self.has_class("WallHangingSignBlock"),
+        })
+    }
+    /// A chest's form, by class: a mod's chest has its template's, whatever
+    /// its name.
+    pub fn chest_form(&self) -> Option<ChestForm> {
+        (self.has_class("ChestBlock") && !self.has_class("CopperChestBlock")).then(|| ChestForm {
+            trapped: self.has_class("TrappedChestBlock"),
         })
     }
 }

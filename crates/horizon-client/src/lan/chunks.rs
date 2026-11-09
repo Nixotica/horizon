@@ -34,7 +34,11 @@ const ENTITY: u8 = 4;
 pub type ModUpdateTag = fn([i32; 3], &ModBlockEntity) -> Option<Compound>;
 
 /// The vanilla block entity type of a block (BlockEntityType.validBlocks).
+/// A content mod's chest makes its template's (`ChestBlock.newBlockEntity`).
 pub fn block_entity_type(name: &str) -> Option<&'static str> {
+    if let Some(chest) = crate::containers::chest_form(name) {
+        return Some(chest.block_entity_type());
+    }
     let n = name.strip_prefix("minecraft:")?;
     Some(match n {
         "chest" => "minecraft:chest",
@@ -541,7 +545,8 @@ impl ChunkEncoder {
     }
 
     /// The encoder with each state's sign form from its template's class: mod
-    /// signs reuse vanilla's sign block entity types.
+    /// signs reuse vanilla's sign block entity types, as mod chests reuse the
+    /// chest's (`containers::chest_form`).
     pub fn with_signs(
         states: impl IntoIterator<Item = (Arc<str>, bool, Option<crate::blocks::SignForm>)>,
         builtin: &Builtin,
@@ -568,7 +573,12 @@ impl ChunkEncoder {
             }
             // A mod block's block entity type is named after the block
             // (`mod_content`: registries.json), unless it is one of vanilla's.
-            let vanilla = sign.map(crate::blocks::SignForm::block_entity_type);
+            let vanilla = sign
+                .map(crate::blocks::SignForm::block_entity_type)
+                .or_else(|| {
+                    crate::containers::chest_form(&name)
+                        .map(crate::blocks::ChestForm::block_entity_type)
+                });
             let modded = !name.starts_with("minecraft:") && vanilla.is_none();
             let t = if modded {
                 Some(&*name)
@@ -1766,6 +1776,46 @@ mod tests {
                 encoder.update_tag(notice, &changed[&notice]).unwrap()
             );
         }
+    }
+
+    /// A mod's chest is of vanilla's chest or trapped chest type, as its block
+    /// is on that type's list by its template's class, and goes out with its
+    /// chunk, where a block entity under a mod block's own type stays out.
+    #[test]
+    fn a_mods_chest_goes_out_with_vanillas_chest_type() {
+        crate::containers::register_test_chests();
+        let builtin = Builtin::parse(
+            r#"{"minecraft:block_entity_type": {"entries": {
+                "minecraft:chest": {"protocol_id": 1},
+                "minecraft:trapped_chest": {"protocol_id": 2},
+                "ruby:strongbox": {"protocol_id": 49},
+                "ruby:trap": {"protocol_id": 50}}}}"#,
+        )
+        .unwrap();
+        let states =
+            ["minecraft:air", "ruby:strongbox", "ruby:trap"].map(|n| (Arc::<str>::from(n), false));
+        let encoder = ChunkEncoder::new(states, &builtin, &[], &[]);
+        assert_eq!(
+            (encoder.entity_type(1), encoder.entity_type(2)),
+            (Some(1), Some(2))
+        );
+        let (strongbox, trap) = ((1, MIN_Y + 2, 3), (5, MIN_Y + 2, 5));
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(strongbox.0, strongbox.1, strongbox.2, 1);
+        chunk.set(trap.0, trap.1, trap.2, 2);
+        let block_entities = HashMap::from([
+            (strongbox, BlockEntity::for_block("ruby:strongbox").unwrap()),
+            (trap, BlockEntity::for_block("ruby:trap").unwrap()),
+        ]);
+        let infos = encoder.encode(&chunk, &block_entities).chunk.block_entities;
+        let mut kinds: Vec<i32> = infos.iter().map(|i| i.kind).collect();
+        kinds.sort_unstable();
+        assert_eq!(kinds, [1, 2]);
+        // A feature that places one gives it the same type's defaults.
+        assert_eq!(
+            block_entity_type("ruby:trap"),
+            Some("minecraft:trapped_chest")
+        );
     }
 
     fn encoder() -> ChunkEncoder {

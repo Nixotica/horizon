@@ -6043,7 +6043,13 @@ impl Game<'_> {
                 "minecraft:dropper" => "inspect_dropper",
                 "minecraft:dispenser" => "inspect_dispenser",
                 n if storage::is_shulker_box(n) => "open_shulker_box",
-                _ => "",
+                // `ChestBlock.getOpenChestStat`: a content mod's chest counts
+                // as its template, by class.
+                n => match horizon_client::containers::chest_form(n) {
+                    Some(chest) if chest.trapped => "trigger_trapped_chest",
+                    Some(_) => "open_chest",
+                    None => "",
+                },
             };
             if !stat.is_empty() {
                 self.award_custom_stat(stat, 1);
@@ -16480,6 +16486,11 @@ impl<'a> Game<'a> {
         };
         if game.native_window() {
             game.native_client_start();
+        }
+        // A native mod's block on a chest template keeps its own block
+        // entity: the tickers by state, classified above, learn which.
+        if game.leave_native_chests() {
+            game.be_anims.classify(registry);
         }
         Ok(game)
     }

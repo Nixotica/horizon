@@ -3,7 +3,7 @@
 //! player's `PlayerEnderChestContainer`, saved as `EnderItems`).
 use super::Game;
 use horizon_client::{
-    containers::{BlockEntity, ChestHalf, is_chest_block},
+    containers::{BlockEntity, ChestHalf, chest_form, is_chest_block},
     items::ItemStack,
     text::Text,
 };
@@ -44,7 +44,8 @@ impl Game<'_> {
                     | "smoker"
                     | "brewing_stand"
                     | "crafter"
-            );
+            )
+            || chest_form(&name).is_some();
         // ChestBlock.getMenuProvider: none while either half is blocked.
         if !container || self.chest_menu_blocked(key, &name) {
             return;
@@ -337,7 +338,7 @@ impl Game<'_> {
             } else {
                 "minecraft:block.ender_chest.close"
             }
-        } else if name.contains("chest") {
+        } else if name.contains("chest") || chest_form(&name).is_some() {
             if open {
                 "minecraft:block.chest.open"
             } else {

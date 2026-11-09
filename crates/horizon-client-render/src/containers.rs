@@ -7,7 +7,7 @@ pub use crate::chunk::block_entity::{
     ModBlockEntityFields, ModContainer, ModEnergyBuffer, ModFluidTanks, ModRevision, PotentSulfur,
     Shelf, Skull, SkullSkin,
 };
-use crate::items::ItemStack;
+use crate::{blocks::ChestForm, items::ItemStack};
 use std::collections::HashMap;
 
 /// a content mod's menu type (`data/<id>/horizon/menu/`, vanilla's
@@ -148,12 +148,13 @@ pub const HOPPER_SLOTS: usize = 5;
 
 /// `getDefaultName` of the `BaseContainerBlockEntity` that `block` holds: the
 /// translation key of its menu's title when it has no custom name. Copper
-/// chests hold a `ChestBlockEntity`, shulker boxes of every colour a
-/// `ShulkerBoxBlockEntity`.
+/// chests and a content mod's chests hold a `ChestBlockEntity`, shulker boxes
+/// of every colour a `ShulkerBoxBlockEntity`.
 pub fn default_name_key(block: &str) -> Option<&'static str> {
     Some(match block {
         "minecraft:chest" | "minecraft:trapped_chest" => "container.chest",
         n if n.ends_with("copper_chest") => "container.chest",
+        n if mod_chest(n).is_some() => "container.chest",
         "minecraft:barrel" => "container.barrel",
         n if n.ends_with("shulker_box") => "container.shulkerBox",
         "minecraft:dispenser" => "container.dispenser",
@@ -324,6 +325,7 @@ fn container_size(name: &str) -> Option<usize> {
         "minecraft:hopper" => Some(HOPPER_SLOTS),
         "minecraft:dispenser" | "minecraft:dropper" => Some(9),
         n if n.ends_with("shulker_box") => Some(27),
+        n if mod_chest(n).is_some() => Some(27),
         _ => None,
     }
 }
@@ -371,6 +373,11 @@ impl Crafter {
 }
 impl BlockEntity {
     pub fn for_block(name: &str) -> Option<Self> {
+        // `ChestBlock.newBlockEntity`: a content mod's chest is a chest,
+        // whatever else its name ends with.
+        if mod_chest(name).is_some() {
+            return Some(Self::Chest(vec![None; 27]));
+        }
         if let Some(hanging) = crate::signs::sign_kind(name) {
             return Some(Self::Sign(crate::signs::SignData {
                 hanging,
@@ -731,12 +738,113 @@ impl BlockEntity {
 }
 pub use crate::providers::Providers;
 
+/// The content mods' chests by block name ([`register_mod_chests`]).
+static MOD_CHESTS: std::sync::OnceLock<HashMap<Box<str>, ChestForm>> = std::sync::OnceLock::new();
+/// Those of them whose block entity a native mod makes ([`leave_native_chests`]).
+static NATIVE_CHESTS: std::sync::OnceLock<std::collections::HashSet<Box<str>>> =
+    std::sync::OnceLock::new();
+
+/// registers the content mods' chests: the blocks of `facts` that are a chest
+/// or a trapped chest by their template's class (`StateFacts::chest_form`),
+/// whatever their names, so that the tables here that go by name know them.
+/// A list set once per process, as the mods' menu types are: false when
+/// another was. A root without mod chests sets none.
+pub fn register_mod_chests(facts: &crate::blocks::BlockFacts) -> bool {
+    register_chests(
+        facts
+            .states
+            .iter()
+            .filter_map(|s| Some((&*s.name, s.chest_form()?))),
+    )
+}
+
+fn register_chests<'a>(chests: impl IntoIterator<Item = (&'a str, ChestForm)>) -> bool {
+    let chests: HashMap<Box<str>, ChestForm> = chests
+        .into_iter()
+        .filter(|(name, _)| !name.starts_with("minecraft:"))
+        .map(|(name, form)| (name.into(), form))
+        .collect();
+    if chests.is_empty() {
+        return true;
+    }
+    match MOD_CHESTS.set(chests) {
+        Ok(()) => true,
+        Err(chests) => MOD_CHESTS.get() == Some(&chests),
+    }
+}
+
+/// The blocks [`register_mod_chests`] found, for the native mods to claim
+/// ([`leave_native_chests`]).
+pub fn mod_chest_blocks() -> impl Iterator<Item = &'static str> {
+    MOD_CHESTS
+        .get()
+        .into_iter()
+        .flat_map(|c| c.keys().map(|n| &**n))
+}
+
+/// The mods' chests whose block entity a native mod makes (its
+/// `native_block_entity`, API 15): they keep the mod's own, its menu and its
+/// drawing, and are no chests to the tables here. The native mods are asked
+/// by the first game; a list set once per process (false when another was).
+pub fn leave_native_chests(blocks: impl IntoIterator<Item = String>) -> bool {
+    let blocks: std::collections::HashSet<Box<str>> =
+        blocks.into_iter().map(String::into_boxed_str).collect();
+    if blocks.is_empty() {
+        return true;
+    }
+    match NATIVE_CHESTS.set(blocks) {
+        Ok(()) => true,
+        Err(blocks) => NATIVE_CHESTS.get() == Some(&blocks),
+    }
+}
+
+/// the tests' mod chests, `ruby:strongbox` and the trapped `ruby:trap`, and
+/// `ruby:press` on a chest template, whose block entity its native mod makes:
+/// the lists are set once per process, so every test registers the same.
+#[cfg(any(test, feature = "test-support"))]
+pub fn register_test_chests() {
+    let form = |trapped| ChestForm { trapped };
+    assert!(
+        register_chests([
+            ("ruby:strongbox", form(false)),
+            ("ruby:trap", form(true)),
+            ("ruby:press", form(false)),
+        ]) && leave_native_chests(["ruby:press".to_owned()]),
+        "another list of mod chests is registered"
+    );
+}
+
+/// A chest or a trapped chest by its block's name: vanilla's, or a content
+/// mod's ([`register_mod_chests`]) that no native mod claims.
+pub fn chest_form(name: &str) -> Option<ChestForm> {
+    match name {
+        "minecraft:chest" => Some(ChestForm { trapped: false }),
+        "minecraft:trapped_chest" => Some(ChestForm { trapped: true }),
+        _ => mod_chest(name),
+    }
+}
+
+/// A content mod's chest by its block's name ([`register_mod_chests`]) that
+/// no native mod claims ([`leave_native_chests`]).
+fn mod_chest(name: &str) -> Option<ChestForm> {
+    if name.starts_with("minecraft:")
+        || NATIVE_CHESTS
+            .get()
+            .is_some_and(|native| native.contains(name))
+    {
+        return None;
+    }
+    MOD_CHESTS.get()?.get(name).copied()
+}
+
 /// A `ChestBlock`, which `ChestBlock.combine` can join into a double chest:
 /// chests, trapped chests and copper chests in every weathering state, waxed
-/// or not (`CopperChestBlock` extends `ChestBlock`). Ender chests are
-/// `EnderChestBlock`s and always single.
+/// or not (`CopperChestBlock` extends `ChestBlock`), and a content mod's chest.
+/// Ender chests are `EnderChestBlock`s and always single.
 pub fn is_chest_block(name: &str) -> bool {
-    matches!(name, "minecraft:chest" | "minecraft:trapped_chest") || name.ends_with("copper_chest")
+    matches!(name, "minecraft:chest" | "minecraft:trapped_chest")
+        || name.ends_with("copper_chest")
+        || mod_chest(name).is_some()
 }
 
 /// A chest block's name with its `type` and `facing` properties.
@@ -811,6 +919,7 @@ pub fn block_menu_type(block: &str) -> Option<&'static str> {
             "minecraft:generic_9x3"
         }
         n if n.ends_with("copper_chest") => "minecraft:generic_9x3",
+        n if mod_chest(n).is_some() => "minecraft:generic_9x3",
         n if n.ends_with("shulker_box") => "minecraft:shulker_box",
         "minecraft:dispenser" | "minecraft:dropper" => "minecraft:generic_3x3",
         "minecraft:hopper" => "minecraft:hopper",
@@ -980,6 +1089,52 @@ mod tests {
         assert!(entity.fits("minecraft:ender_chest"));
         // A stone block is not an ender chest.
         assert!(BlockEntity::for_block("minecraft:stone").is_none());
+    }
+
+    /// A content mod's chest is a chest by its template's class, whatever its
+    /// name: it holds a chest's 27 slots, which a change of its state keeps
+    /// (`isValidBlockState`), titles and opens as a chest, and pairs only with
+    /// halves of its own block.
+    #[test]
+    fn a_registered_mod_chest_is_a_chest_whatever_its_name() {
+        register_test_chests();
+        let mut entity = BlockEntity::for_block("ruby:strongbox").expect("a mod chest's");
+        assert!(matches!(&entity, BlockEntity::Chest(items) if items.len() == 27));
+        assert_eq!(entity.id(), "minecraft:chest");
+        entity.slots_mut()[4] = Some(ItemStack::new("minecraft:diamond", 3));
+        assert!(entity.fits("ruby:strongbox"));
+        assert!(!entity.fits("ruby:crate"), "an unregistered mod block");
+        assert!(BlockEntity::for_block("ruby:crate").is_none());
+        assert_eq!(chest_form("ruby:trap"), Some(ChestForm { trapped: true }));
+        assert_eq!(
+            chest_form("ruby:strongbox"),
+            Some(ChestForm { trapped: false })
+        );
+        assert_eq!(default_name_key("ruby:trap"), Some("container.chest"));
+        assert_eq!(
+            block_menu_type("ruby:strongbox"),
+            Some("minecraft:generic_9x3")
+        );
+        let half = |block, kind| ChestHalf {
+            block,
+            kind,
+            facing: "north",
+        };
+        assert!(is_chest_block("ruby:trap"));
+        assert!(half("ruby:trap", "left").pairs_with(&half("ruby:trap", "right")));
+        assert!(!half("ruby:trap", "left").pairs_with(&half("ruby:strongbox", "right")));
+        assert!(!half("ruby:strongbox", "left").pairs_with(&half("minecraft:chest", "right")));
+        // A block whose native mod makes its block entity keeps the mod's.
+        assert_eq!(chest_form("ruby:press"), None);
+        assert!(BlockEntity::for_block("ruby:press").is_none());
+        assert!(!is_chest_block("ruby:press"));
+        // Vanilla's go by name as before; copper chests are no form of these two.
+        assert_eq!(
+            chest_form("minecraft:trapped_chest"),
+            Some(ChestForm { trapped: true })
+        );
+        assert_eq!(chest_form("minecraft:copper_chest"), None);
+        assert!(is_chest_block("minecraft:copper_chest"));
     }
 
     /// An end portal placed with /setblock gets its block entity (`EndPortalBlock.newBlockEntity`),
